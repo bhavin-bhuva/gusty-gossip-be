@@ -8,13 +8,14 @@ if (['local', 'nodemon-local'].includes(process.env.NODE_ENV?.trim())) {
 }
 
 import http, { Server as HttpServer } from 'http';
-import { Server as SocketIOServer, Socket } from 'socket.io';
+import { Server as SocketIOServer } from 'socket.io';
 
 import express from 'express';
 import compression from 'compression';
 import cors from 'cors';
 import router from './routes';
-import jwt from 'jsonwebtoken';
+import { socketJwt } from './middlewares/socketAuth';
+import { SocketServer } from './socketService';
 import { expressjwt } from 'express-jwt';
 import { DBManaager } from './db/db_manager';
 
@@ -23,7 +24,6 @@ export class ApiServer {
   public server: HttpServer;
   public io: SocketIOServer;
   private PORT;
-  // private resp = new TPCResponse();
 
   constructor() {
     this.PORT = process.env.PORT || 8080;
@@ -57,22 +57,7 @@ export class ApiServer {
       }).unless({ path: publicRoutes })
     );
 
-    this.io.use((socket: Socket, next) => {
-      const token: string = socket.handshake.query.token as string;
-      if (!token) {
-        return next(new Error('Authentication error: Token not provided.'));
-      }
-
-      jwt.verify(token, process.env.JWT!, (err, decoded) => {
-        if (err) {
-          return next(new Error('Authentication error: Invalid token.'));
-        }
-
-        // Attach the decoded token payload to the socket object for further use
-        socket['decoded'] = decoded;
-        next();
-      });
-    });
+    this.io.use(socketJwt);
   }
 
   public routes() {
@@ -90,21 +75,7 @@ export class ApiServer {
     });
 
     // Socket.IO connection handling
-    this.io.on('connection', (socket: Socket) => {
-      console.log('A user connected', [socket.id, socket['decoded']._id]);
-
-      // Handling messages from clients
-      socket.on('message', (data: any) => {
-        console.log('Received message:', data);
-        // Broadcast the message to all connected clients except the sender
-        socket.broadcast.emit('message', data);
-      });
-
-      // Handling disconnection
-      socket.on('disconnect', () => {
-        console.log('A user disconnected');
-      });
-    });
+    SocketServer(this.io);
 
     this.server.listen(this.PORT, () => {
       // eslint-disable-next-line no-console
